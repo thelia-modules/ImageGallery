@@ -1,0 +1,36 @@
+{# Injected in the scripts_extra block of the core module/configure.html.twig page
+   (hook `module.config-js`). Drives the per-group preview iframes: lazy loading
+   on first opening, and desktop/mobile width switching. #}
+{% include '@ImageGalleryModule/backOffice/default-twig/imagegallery/hook/_side-nav-active.html.twig' %}
+<script>
+    (function () {
+        'use strict';
+
+        document.querySelectorAll('[data-image-gallery-preview-toggle]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var panel = document.getElementById(button.getAttribute('data-image-gallery-preview-toggle'));
+                if (!panel) {
+                    return;
+                }
+                panel.classList.toggle('d-none');
+
+                var iframe = panel.querySelector('iframe');
+                if (iframe && !iframe.getAttribute('src')) {
+                    iframe.setAttribute('src', iframe.getAttribute('data-src'));
+                }
+            });
+        });
+
+        document.querySelectorAll('[data-image-gallery-preview]').forEach(function (panel) {
+            var iframe = panel.querySelector('iframe');
+            panel.querySelectorAll('[data-image-gallery-preview-width]').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    iframe.style.width = button.getAttribute('data-image-gallery-preview-width');
+                    panel.querySelectorAll('[data-image-gallery-preview-width]').forEach(function (other) {
+                        other.classList.toggle('active', other === button);
+                    });
+                });
+            });
+        });
+    })();
+</script>

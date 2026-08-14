@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<database defaultIdMethod="native" name="TheliaMain" namespace="ImageGallery\Model">
+    <!--
+    See propel documentation on http://propelorm.org for all information about schema file
+    -->
+
+    <table name="image_gallery">
+        <column autoIncrement="true" name="id" primaryKey="true" required="true" type="INTEGER" />
+        <column name="file" type="VARCHAR" size="255" />
+        <column name="mobile_file" type="VARCHAR" size="255" />
+        <column name="position" type="INTEGER" />
+        <column name="disable" type="INTEGER" />
+        <column name="group" size="255" type="VARCHAR" />
+        <column name="alt" size="255" type="VARCHAR" />
+        <column name="url" size="255" type="VARCHAR" />
+        <column name="link_target" size="8" type="VARCHAR" />
+        <column name="title" size="255" type="VARCHAR" />
+        <column name="description" type="CLOB" />
+        <column name="chapo" type="LONGVARCHAR" />
+        <column name="postscriptum" type="LONGVARCHAR" />
+        <column name="button_label" size="255" type="VARCHAR" />
+        <column name="limited" type="INTEGER" />
+        <column name="start_date" type="TIMESTAMP" />
+        <column name="end_date" type="TIMESTAMP" />
+        <index name="idx_image_gallery_group_position">
+            <index-column name="group" />
+            <index-column name="position" />
+        </index>
+        <index name="idx_image_gallery_disable">
+            <index-column name="disable" />
+        </index>
+        <behavior name="timestampable" />
+        <behavior name="i18n">
+            <parameter name="i18n_columns" value="alt, title, description, chapo, postscriptum, button_label" />
+        </behavior>
+    </table>
+
+    <external-schema filename="local/config/schema.xml" referenceOnly="true" />
+</database>
