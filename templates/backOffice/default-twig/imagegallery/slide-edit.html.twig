@@ -1,0 +1,144 @@
+{% extends '@BackOfficeDefaultTwig/base.html.twig' %}
+{% set d = 'imagegallery.bo.default-twig' %}
+
+{% block title %}{{ 'Edit a slide'|trans({}, d) }}{% endblock %}
+{% block body_testid %}image-gallery-slide-edit{% endblock %}
+
+{% block breadcrumb %}
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ path('admin.home') }}">{{ 'Home'|trans }}</a></li>
+            <li class="breadcrumb-item"><a href="{{ configuration_url }}">{{ 'Image galleries'|trans({}, d) }}</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{ slide.title ?? ('#' ~ slide.id) }}</li>
+        </ol>
+    </nav>
+{% endblock %}
+
+{# Thelia's TwigParser exposes `app` as a plain object without `flashes`, so the
+   base layout's flash block never renders anything: read the flash bag from the
+   session directly instead. #}
+{% block flash %}
+    {% if app.session %}
+        {% for type, messages in app.session.flashBag.all %}
+            {% for message in messages %}
+                <div class="alert alert-{{ type }} alert-dismissible fade show" role="alert" data-testid="bo-flash-{{ type }}">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endfor %}
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+    <div class="container-fluid">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="h4 mb-0">
+                {{ 'Edit a slide'|trans({}, d) }} — {{ slide.title ?? ('#' ~ slide.id) }}
+                <span class="badge text-bg-light">{{ slide.group }}</span>
+            </h1>
+            <div class="d-flex align-items-center gap-2">
+                {{ component('BoLanguageSwitcher', { currentLanguageId: edit_language_id }) }}
+                <a href="{{ configuration_url }}" class="btn btn-outline-secondary btn-sm" data-testid="image-gallery-slide-close">
+                    {{ 'Close'|trans }}
+                </a>
+            </div>
+        </div>
+
+        {% form_theme slide_form with bo_form_themes only %}
+        {{ form_start(slide_form, { action: path('image_gallery.save', { slideId: slide.id }), method: 'post', attr: { 'data-testid': 'image-gallery-slide-form' } }) }}
+            <div class="row">
+                <div class="col-lg-8">
+                    <div class="card mb-3">
+                        <div class="card-header">{{ 'Content'|trans({}, d) }}</div>
+                        <div class="card-body">
+                            {{ form_row(slide_form.title) }}
+                            {{ form_row(slide_form.alt) }}
+                            {{ form_row(slide_form.chapo) }}
+                            {{ form_row(slide_form.description, { attr: { class: 'wysiwyg', rows: 6 } }) }}
+                            {{ form_row(slide_form.postscriptum, { attr: { rows: 3 } }) }}
+                        </div>
+                    </div>
+
+                    <div class="card mb-3">
+                        <div class="card-header">{{ 'Link / call to action'|trans({}, d) }}</div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">{{ form_row(slide_form.url) }}</div>
+                                <div class="col-md-3">{{ form_row(slide_form.link_target) }}</div>
+                                <div class="col-md-3">{{ form_row(slide_form.button_label) }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4">
+                    <div class="card mb-3">
+                        <div class="card-header">{{ 'Publication'|trans({}, d) }}</div>
+                        <div class="card-body" data-controller="bo-date-range">
+                            {{ form_row(slide_form.group) }}
+                            <div class="form-check form-switch mb-2">
+                                {{ form_widget(slide_form.visible, { attr: { class: 'form-check-input' } }) }}
+                                {{ form_label(slide_form.visible, null, { label_attr: { class: 'form-check-label' } }) }}
+                            </div>
+                            <div class="form-check form-switch mb-2">
+                                {{ form_widget(slide_form.limited, { attr: { class: 'form-check-input' } }) }}
+                                {{ form_label(slide_form.limited, null, { label_attr: { class: 'form-check-label' } }) }}
+                            </div>
+                            {{ form_row(slide_form.start_date, { attr: { 'data-bo-date-range-target': 'start' } }) }}
+                            {{ form_row(slide_form.end_date, { attr: { 'data-bo-date-range-target': 'end' } }) }}
+                            <div class="text-danger small" data-bo-date-range-target="message"></div>
+                        </div>
+                    </div>
+
+                    <div class="d-grid mb-3">
+                        <button type="submit" class="btn btn-primary" data-testid="image-gallery-slide-save">
+                            <i class="bi bi-check2" aria-hidden="true"></i> {{ 'Save'|trans }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        {{ form_end(slide_form) }}
+
+        {% set image_token = attribute(image_form, '_token') %}
+        <div class="row">
+            {% for variant in ['desktop', 'mobile'] %}
+                {% set current_url = variant == 'desktop' ? slide.imageUrl : slide.mobileImageUrl %}
+                <div class="col-md-6">
+                    <div class="card mb-3" data-testid="image-gallery-image-{{ variant }}">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>
+                                <i class="bi {{ variant == 'desktop' ? 'bi-display' : 'bi-phone' }}" aria-hidden="true"></i>
+                                {{ (variant == 'desktop' ? 'Desktop image' : 'Mobile image')|trans({}, d) }}
+                                <span class="text-danger" aria-hidden="true">*</span>
+                            </span>
+                        </div>
+                        <div class="card-body" data-controller="bo-image-preview">
+                            <img src="{{ current_url }}" alt="" class="img-thumbnail mb-2"
+                                 style="max-height: 200px; {{ current_url ? '' : 'display:none' }}"
+                                 data-bo-image-preview-target="image">
+                            {% if variant == 'mobile' and not slide.mobileFile %}
+                                <p class="text-danger small">{{ 'A mobile image is required before this slide can be saved.'|trans({}, d) }}</p>
+                            {% endif %}
+                            <form method="post" action="{{ path('image_gallery.image.upload', { slideId: slide.id, variant: variant }) }}" enctype="multipart/form-data">
+                                <input type="hidden" name="{{ image_token.vars.full_name }}" value="{{ image_token.vars.value }}">
+                                <div class="input-group">
+                                    <input type="file" name="{{ image_form.file.vars.full_name }}" class="form-control" accept="image/*" required
+                                           data-bo-image-preview-target="input">
+                                    <button type="submit" class="btn btn-success" data-testid="image-gallery-image-{{ variant }}-submit">
+                                        {{ (current_url ? 'Replace'|trans({}, d) : 'Upload'|trans({}, d)) }}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts_extra %}
+    {{ safe_hook('wysiwyg.js', { location: 'wysiwyg-image-gallery-slide-edit' }) }}
+    {% include '@ImageGalleryModule/backOffice/default-twig/imagegallery/hook/_side-nav-active.html.twig' %}
+{% endblock %}

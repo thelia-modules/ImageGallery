@@ -1,0 +1,47 @@
+{# The BO sidebar resolves the active section by URL prefix, so every module page
+   under /admin/module/* lights up the "Modules" section. The ImageGallery entry lives
+   in the "Tools" menu (hook main.top-menu-tools), which offers no active-state
+   support: fix the sidebar client-side on the module's own pages only. #}
+{# The theme's sub-item rule (.nav.collapse .nav-link) resets background and
+   box-shadow after the .active rule, so an active child link is invisible:
+   restore the theme's active affordance with a more specific selector. #}
+<style>
+    .bo-side-nav .nav.collapse .nav-link.active,
+    .bo-side-nav .nav.collapsing .nav-link.active {
+        background: rgba(255, 255, 255, .04);
+        box-shadow: inset 4px 0 0 var(--bs-primary);
+        color: #ffffff;
+    }
+</style>
+<script>
+    (function () {
+        'use strict';
+
+        var toolsPanel = document.getElementById('bo-nav-tools-collapse');
+        if (!toolsPanel) {
+            return;
+        }
+
+        var modulesPanel = document.getElementById('bo-nav-modules-collapse');
+        var modulesToggle = document.querySelector('a[href="#bo-nav-modules-collapse"]');
+        if (modulesPanel) {
+            modulesPanel.classList.remove('show');
+        }
+        if (modulesToggle) {
+            modulesToggle.classList.remove('active');
+            modulesToggle.setAttribute('aria-expanded', 'false');
+        }
+
+        var toolsToggle = document.querySelector('a[href="#bo-nav-tools-collapse"]');
+        toolsPanel.classList.add('show');
+        if (toolsToggle) {
+            toolsToggle.classList.add('active');
+            toolsToggle.setAttribute('aria-expanded', 'true');
+        }
+
+        var entry = document.getElementById('tools_menu_image_gallery');
+        if (entry) {
+            entry.classList.add('active');
+        }
+    })();
+</script>

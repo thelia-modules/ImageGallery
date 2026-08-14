@@ -1,0 +1,154 @@
+{# Default carousel markup — self-contained (scoped CSS + vanilla JS, no library).
+   Themes may override this template or ignore the theme hook entirely and build
+   their own markup from /api/front/image-galleries (see the module Readme). #}
+<section class="image-gallery" id="image-gallery-{{ group }}" data-image-gallery-group="{{ group }}"
+         {% if autoplay > 0 %}data-image-gallery-autoplay="{{ autoplay }}"{% endif %}
+         aria-roledescription="carousel">
+    <div class="image-gallery__track" data-image-gallery-track>
+        {% for slide in slides %}
+            <div class="image-gallery__slide" role="group" aria-roledescription="slide"
+                 aria-label="{{ loop.index }} / {{ loop.length }}" data-image-gallery-slide>
+                <picture>
+                    {% if slide.mobileImageSrcset ?? slide.mobileImageUrl %}
+                        <source media="(max-width: 767px)"
+                                srcset="{{ slide.mobileImageSrcset ?? slide.mobileImageUrl }}" sizes="100vw">
+                    {% endif %}
+                    <img src="{{ slide.imageUrl }}"
+                         {% if slide.imageSrcset ?? null %}srcset="{{ slide.imageSrcset }}" sizes="100vw"{% endif %}
+                         alt="{{ slide.alt ?? slide.title }}"
+                         {% if not loop.first %}loading="lazy"{% endif %}>
+                </picture>
+                {% if slide.title or slide.chapo or slide.description or (slide.buttonLabel and slide.url) %}
+                    <div class="image-gallery__caption">
+                        {% if slide.title %}<p class="image-gallery__title">{{ slide.title }}</p>{% endif %}
+                        {% if slide.chapo %}<p class="image-gallery__chapo">{{ slide.chapo }}</p>{% endif %}
+                        {% if slide.description %}<div class="image-gallery__description">{{ slide.description|raw }}</div>{% endif %}
+                        {% if slide.url %}
+                            <a class="image-gallery__cta" href="{{ slide.url }}"
+                               {% if slide.linkTarget == '_blank' %}target="_blank" rel="noopener"{% endif %}>
+                                {{ slide.buttonLabel ?: slide.title }}
+                            </a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+    {% if slides|length > 1 %}
+        <button type="button" class="image-gallery__nav image-gallery__nav--prev" data-image-gallery-prev aria-label="{{ 'Previous slide'|trans([], 'imagegallery') }}">&#10094;</button>
+        <button type="button" class="image-gallery__nav image-gallery__nav--next" data-image-gallery-next aria-label="{{ 'Next slide'|trans([], 'imagegallery') }}">&#10095;</button>
+    {% endif %}
+</section>
+<style>
+    .image-gallery { position: relative; }
+    .image-gallery__track {
+        display: flex;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        /* No scroll-behavior: smooth here: Chrome cancels animated programmatic
+           scrolling on a mandatory snap container — the script below suspends
+           snapping while it animates. */
+        scrollbar-width: none;
+    }
+    .image-gallery__track::-webkit-scrollbar { display: none; }
+    .image-gallery__slide {
+        position: relative;
+        flex: 0 0 100%;
+        scroll-snap-align: start;
+    }
+    .image-gallery__slide img { display: block; width: 100%; height: auto; }
+    .image-gallery__caption {
+        position: absolute;
+        inset-inline-start: 0;
+        bottom: 0;
+        max-width: 100%;
+        padding: 1rem 1.5rem;
+        color: #fff;
+        background: linear-gradient(transparent, rgba(0, 0, 0, .55));
+    }
+    .image-gallery__title { margin: 0; font-size: 1.5rem; font-weight: 700; }
+    .image-gallery__chapo { margin: .25rem 0 0; }
+    .image-gallery__description { margin: .25rem 0 0; font-size: .9rem; }
+    .image-gallery__cta {
+        display: inline-block;
+        margin-top: .75rem;
+        padding: .5rem 1.25rem;
+        color: #fff;
+        background: rgba(255, 255, 255, .25);
+        border: 1px solid #fff;
+        border-radius: .25rem;
+        text-decoration: none;
+    }
+    .image-gallery__nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 2.5rem;
+        height: 2.5rem;
+        border: none;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, .45);
+        color: #fff;
+        font-size: 1.1rem;
+        cursor: pointer;
+    }
+    .image-gallery__nav--prev { inset-inline-start: .75rem; }
+    .image-gallery__nav--next { inset-inline-end: .75rem; }
+</style>
+<script>
+    (function () {
+        'use strict';
+        document.querySelectorAll('.image-gallery:not([data-image-gallery-ready])').forEach(function (root) {
+            root.setAttribute('data-image-gallery-ready', '1');
+
+            var track = root.querySelector('[data-image-gallery-track]');
+            var slides = root.querySelectorAll('[data-image-gallery-slide]');
+            if (!track || slides.length < 2) {
+                return;
+            }
+
+            var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            var snapRestoreTimer = null;
+
+            // Chrome cancels smooth programmatic scrolling on a mandatory snap
+            // container: suspend snapping while animating, restore on scrollend.
+            var suspendSnap = function () {
+                track.style.scrollSnapType = 'none';
+                window.clearTimeout(snapRestoreTimer);
+                var restore = function () {
+                    window.clearTimeout(snapRestoreTimer);
+                    track.style.scrollSnapType = '';
+                };
+                track.addEventListener('scrollend', restore, { once: true });
+                snapRestoreTimer = window.setTimeout(restore, 1000);
+            };
+
+            var goTo = function (delta) {
+                var width = track.clientWidth;
+                var index = Math.round(track.scrollLeft / width) + delta;
+                index = (index + slides.length) % slides.length;
+
+                if (reducedMotion) {
+                    track.scrollLeft = index * width;
+                    return;
+                }
+
+                suspendSnap();
+                track.scrollTo({ left: index * width, behavior: 'smooth' });
+            };
+
+            var prev = root.querySelector('[data-image-gallery-prev]');
+            var next = root.querySelector('[data-image-gallery-next]');
+            if (prev) { prev.addEventListener('click', function () { goTo(-1); }); }
+            if (next) { next.addEventListener('click', function () { goTo(1); }); }
+
+            var interval = parseInt(root.getAttribute('data-image-gallery-autoplay') || '0', 10);
+            if (interval > 0 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                var timer = setInterval(function () { goTo(1); }, interval);
+                var stop = function () { clearInterval(timer); };
+                root.addEventListener('pointerenter', stop, { once: true });
+                root.addEventListener('focusin', stop, { once: true });
+            }
+        });
+    })();
+</script>

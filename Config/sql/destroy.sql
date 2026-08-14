@@ -1,0 +1,6 @@
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `image_gallery`;
+DROP TABLE IF EXISTS `image_gallery_i18n`;
+
+SET FOREIGN_KEY_CHECKS = 1;

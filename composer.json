@@ -1,0 +1,14 @@
+{
+    "name": "thelia/image-gallery-module",
+    "description": "Manage image galleries by group, with mandatory desktop/mobile variants, publication window and a back-office preview rendering the theme's own component",
+    "license": "LGPL-3.0+",
+    "type": "thelia-module",
+    "require": {
+        "php": ">=8.3",
+        "thelia/installer": "~1.1",
+        "symfony/html-sanitizer": "^7.4"
+    },
+    "extra": {
+        "installer-name": "ImageGallery"
+    }
+}

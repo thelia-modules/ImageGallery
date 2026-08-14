@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<config xmlns="http://thelia.net/schema/dic/config"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://thelia.net/schema/dic/config http://thelia.net/schema/dic/config/thelia-1.0.xsd">
+
+    <!-- Les hooks back-office sont enregistrés par ImageGallery\Hook\BackHook::getSubscribedHooks()
+         (auto-discovery Thelia 3). L'affichage front est à la charge du thème
+         (resources('/api/front/...') ou theme_hook), plus de rendu Smarty déclaratif. -->
+</config>
