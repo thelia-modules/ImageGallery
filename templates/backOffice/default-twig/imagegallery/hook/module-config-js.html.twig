@@ -1,10 +1,47 @@
 {# Injected in the scripts_extra block of the core module/configure.html.twig page
    (hook `module.config-js`). Drives the per-group preview iframes: lazy loading
-   on first opening, and desktop/mobile width switching. #}
+   on first opening, and the desktop/tablet/mobile viewport switch. #}
 {% include '@ImageGalleryModule/backOffice/default-twig/imagegallery/hook/_side-nav-active.html.twig' %}
 <script>
     (function () {
         'use strict';
+
+        // The default viewport is the FIRST preset button rendered by the template
+        // (module-configuration.html.twig owns the preset list): reading it back from
+        // the DOM keeps a single source of truth instead of a width duplicated here.
+        function defaultWidth(panel) {
+            var first = panel.querySelector('[data-image-gallery-preview-width]');
+
+            return first ? String(first.getAttribute('data-image-gallery-preview-width')) : '';
+        }
+
+        // Applies a viewport width to the panel's iframe. The iframe width IS the inner
+        // viewport, so the front theme media queries apply. The iframe is reloaded on
+        // every switch: theme components (splide, Stimulus controllers…) measure
+        // themselves on mount, so a plain resize leaves them laid out for the previous
+        // width. Nothing is reloaded while the iframe is still unloaded (lazy `data-src`).
+        function applyWidth(panel, width) {
+            var iframe = panel.querySelector('iframe');
+
+            if (iframe && width) {
+                iframe.style.width = width;
+
+                var src = iframe.getAttribute('src');
+
+                if (src && src !== 'about:blank') {
+                    iframe.src = src;
+                }
+            }
+
+            panel.querySelectorAll('[data-image-gallery-preview-width]').forEach(function (button) {
+                // String() on both sides: the attribute is always a string, the compared
+                // value may come from a dataset read elsewhere.
+                button.classList.toggle(
+                    'active',
+                    String(button.getAttribute('data-image-gallery-preview-width')) === String(width)
+                );
+            });
+        }
 
         document.querySelectorAll('[data-image-gallery-preview-toggle]').forEach(function (button) {
             button.addEventListener('click', function () {
@@ -16,19 +53,19 @@
 
                 var iframe = panel.querySelector('iframe');
                 if (iframe && !iframe.getAttribute('src')) {
+                    // Set the default width BEFORE loading, so the very first render
+                    // already happens at the right viewport (no load-then-reload).
+                    applyWidth(panel, defaultWidth(panel));
                     iframe.setAttribute('src', iframe.getAttribute('data-src'));
                 }
             });
         });
 
         document.querySelectorAll('[data-image-gallery-preview]').forEach(function (panel) {
-            var iframe = panel.querySelector('iframe');
             panel.querySelectorAll('[data-image-gallery-preview-width]').forEach(function (button) {
-                button.addEventListener('click', function () {
-                    iframe.style.width = button.getAttribute('data-image-gallery-preview-width');
-                    panel.querySelectorAll('[data-image-gallery-preview-width]').forEach(function (other) {
-                        other.classList.toggle('active', other === button);
-                    });
+                button.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    applyWidth(panel, String(button.getAttribute('data-image-gallery-preview-width')));
                 });
             });
         });

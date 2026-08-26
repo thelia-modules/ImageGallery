@@ -3,7 +3,7 @@
 Manage image galleries from the Thelia back-office: slides are organized by **group**, each slide carries a
 **desktop image** and a **mobile image** (both mandatory, rendered through `<picture>`), a link with target,
 a CTA label, and an optional **publication window** (start/end dates). The configuration screen provides drag & drop
-ordering, per-slide edition, and a live preview of the default front rendering in desktop and mobile widths.
+ordering, per-slide edition, and a live preview of the front rendering at desktop, tablet and mobile widths.
 
 > **Thelia 3 only** (module 1.0.0): requires Thelia 3 with the Twig back-office
 > (`active-admin-template = default-twig`). This module is the successor of the
@@ -71,8 +71,14 @@ The configuration screen lives on the module page (`/admin/module/ImageGallery`,
 * per-slide edit page: content (title, chapo, description with WYSIWYG, postscriptum), link + CTA label,
   desktop/mobile images with instant preview, visibility toggle and publication window, per-language edition.
   Saving is blocked (danger flash) while the slide has no mobile image — this only happens on legacy 2.x rows;
-* preview card per group rendering the gallery inside an iframe, switchable between desktop and mobile
-  widths.
+* preview card per group rendering the gallery inside an iframe, switchable between three viewport presets
+  — **Desktop 1280px / Tablet 768px / Mobile 390px**. The iframe width *is* the inner viewport, so the
+  theme's media queries really apply. Switching a preset **reloads the iframe**: theme components (sliders,
+  Stimulus controllers) measure themselves on mount, so a plain resize would leave them laid out for the
+  previous width. The preset list lives in
+  `templates/backOffice/default-twig/imagegallery/hook/module-configuration.html.twig` (the first entry is
+  the default width, read back from the DOM by the JS) — add or reorder presets there, nothing to change in
+  the JS.
 
 ### Preview rendering (transparent for administrators)
 
@@ -93,6 +99,30 @@ while the default rendering uses the back-office edition locale. A LiveComponent
 initial HTML in the iframe (no live interactivity there). `PreviewSettings::ensureFrontAssets()` also ensures
 the `templates-assets` public symlink of the front theme exists, since Thelia only creates it during front
 requests.
+
+## Demo data (seed command)
+
+```bash
+php Thelia image_gallery:seed --group=demo --count=6 --purge
+```
+
+Creates ready-to-use demo slides in a group, with **both images generated** (GD): 1920×600 desktop and
+828×1104 mobile — the mobile visual is mandatory in this module, so a desktop-only seed would produce rows
+the back-office refuses to save. The first four slides cover the four publication states (**online**,
+**disabled**, **scheduled** in a future window, **expired**), and every site locale gets a translation
+(`title`, `alt`, `chapo`, `description`, `postscriptum`, `button_label`; French wording for `fr_FR`,
+English otherwise).
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--group` | `demo` | Group to seed. Must match `ImageGallery::GROUP_PATTERN` (letters, digits, `-`, `_`, max 64). |
+| `--count` | `4` | Number of slides, minimum 4 (below that the publication states are not all covered). |
+| `--purge` | off | Delete every existing slide of the group first. |
+
+The command is **idempotent**: without `--purge` it refuses to touch a non-empty group (warning, exit 0);
+with `--purge` it deletes the group through the slide service — image files and image cache included — then
+re-seeds it. Slides go through `ImageGallerySlideService`, so the business events of the next section are
+dispatched exactly as they are for a back-office creation.
 
 ## Front-office integration (to do in your theme)
 
@@ -256,6 +286,292 @@ The width sets are constants of `Service/ImageGalleryImageProcessor.php` (`DESKT
 `MOBILE_SRCSET_WIDTHS`): adapt them if your theme breakpoints change. The `sizes` attribute must reflect the
 actual rendered width — `100vw` for a full-width gallery, e.g. `50vw` if the gallery sits in a half-width
 column.
+
+## Extending the module (no fork needed)
+
+Four extension points cover what would otherwise require a fork:
+
+1. **Form fields** — the module forms have stable names: listen to
+   `TheliaEvents::FORM_AFTER_BUILD . '.' . ImageGallerySlideForm::getName()` (`image_gallery_slide`, edition)
+   or `.image_gallery_create` (creation) and add your fields to the builder. The core still dispatches
+   `FORM_AFTER_BUILD` in Thelia 3 (`Thelia\Form\BaseForm::__construct`), so this channel is unchanged from
+   Thelia 2. Extra submitted values then travel with the validated form data.
+2. **Rendering** — back-office hooks declared by `ImageGallery::getHooks()` and rendered with `safe_hook()`:
+
+   | Hook code | Rendered in | Arguments |
+   |---|---|---|
+   | `imagegallery.configuration.top` | top of the module configuration page | — |
+   | `imagegallery.configuration.bottom` | bottom of the module configuration page | — |
+   | `imagegallery.slide-edit.extra-fields` | **inside** the slide edition `<form>` | `slide_id`, `group` |
+   | `imagegallery.slide-edit.js` | `scripts_extra` block of the slide edition page | `slide_id`, `group` |
+
+3. **Persistence** — business events (`ImageGallery\Event\ImageGalleryEvents`):
+   `image_gallery.slide.create|update|delete` (pre-save, inside the transaction) and
+   `image_gallery.slide.created|updated|deleted` (post-save, after commit). `ImageGallerySlideEvent` carries
+   the slide model and the COMPLETE validated form data (your fields included): persist on the post-save
+   events.
+4. **Lists** — `image_gallery.query.extend` (alter the `ImageGalleryQuery` before it runs — check
+   `isBackendContext()`) and `image_gallery.row.enrich` (add keys to the presented row). Both are dispatched
+   by `ImageGalleryPresenter`, so they apply to the back-office tables, the front Twig component and the
+   theme hook at once.
+
+> The **API resources** are extended the standard API Platform / Propel-bridge way
+> (`ResourceAddonInterface`, state providers, filters) — the module does not duplicate that mechanism with
+> events of its own. Use the addon contract for `/api/front/image-galleries` and `/api/admin/image-galleries`.
+
+### How to add business fields to the slide edition form
+
+This is **the** supported way for a project module to attach its own business data to a slide. The example
+adds a single `my_field` choice to the slide edition page from a module named `MyModule`. Everything is
+auto-discovered: as long as your module's `configureServices()` loads its namespace with
+`->autowire(true)->autoconfigure(true)` (the Thelia 3 default), there is **nothing to declare in
+`config.xml`** — neither the subscribers nor the hook.
+
+#### 1. Add the form field
+
+```php
+<?php
+// local/modules/MyModule/FormExtend/ImageGallerySlideFormExtend.php
+
+declare(strict_types=1);
+
+namespace MyModule\FormExtend;
+
+use ImageGallery\Form\ImageGallerySlideForm;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Thelia\Core\Event\TheliaEvents;
+use Thelia\Core\Event\TheliaFormEvent;
+use Thelia\Core\Translation\Translator;
+
+class ImageGallerySlideFormExtend implements EventSubscriberInterface
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [
+            TheliaEvents::FORM_AFTER_BUILD.'.'.ImageGallerySlideForm::getName() => [
+                ['addMyFields', 64],
+            ],
+        ];
+    }
+
+    public function addMyFields(TheliaFormEvent $event): void
+    {
+        $translator = Translator::getInstance();
+
+        $event->getForm()->getFormBuilder()
+            ->add('my_field', ChoiceType::class, [
+                'required' => false,
+                'choices' => [
+                    $translator->trans('All customers', [], 'mymodule') => 'all',
+                    $translator->trans('Members only', [], 'mymodule') => 'members',
+                ],
+                'label' => $translator->trans('Audience', [], 'mymodule'),
+            ]);
+    }
+}
+```
+
+Notes:
+
+- Keep `'required' => false` unless you really want to break every other code path that submits the form
+  (creation dialog, seed command, programmatic saves): a missing value must never invalidate a slide.
+- Use `ImageGallerySlideForm::getName()` rather than the literal `'image_gallery_slide'`.
+- Declaring the field here is **mandatory**, not optional: the module keeps Symfony's default
+  `allow_extra_fields = false`, so an input the form does not know about is rejected by validation
+  (« This form should not contain extra fields »). Declaring it is also what makes it appear in the
+  validated data — the two go together.
+- For a field that must also be filled at creation time, subscribe the same way to
+  `TheliaEvents::FORM_AFTER_BUILD.'.'.ImageGalleryCreateForm::getName()` (`image_gallery_create`).
+
+#### 2. Render the field in the back-office
+
+The slide edition template exposes a slot **inside** the `image_gallery_slide` form:
+`{{ safe_hook('imagegallery.slide-edit.extra-fields', { slide_id: slide.id, group: slide.group }) }}`.
+Implement a back-office hook, load the current value from your own tables and render your template:
+
+```php
+<?php
+// local/modules/MyModule/Hook/ImageGalleryBackHook.php
+
+declare(strict_types=1);
+
+namespace MyModule\Hook;
+
+use MyModule\Model\MySlideDataQuery;
+use Thelia\Core\Event\Hook\HookRenderEvent;
+use Thelia\Core\Hook\BaseHook;
+
+class ImageGalleryBackHook extends BaseHook
+{
+    public static function getSubscribedHooks(): array
+    {
+        return [
+            'imagegallery.slide-edit.extra-fields' => [
+                'type' => 'back',
+                'method' => 'onSlideEditExtraFields',
+            ],
+        ];
+    }
+
+    public function onSlideEditExtraFields(HookRenderEvent $event): void
+    {
+        $slideId = (int) $event->getArgument('slide_id');
+
+        $event->add($this->render('image-gallery-slide-extra-fields.html.twig', [
+            'slide_id' => $slideId,
+            'my_field' => MySlideDataQuery::create()->findPk($slideId)?->getMyField() ?? 'all',
+        ]));
+    }
+}
+```
+
+```twig
+{# local/modules/MyModule/templates/backOffice/default-twig/image-gallery-slide-extra-fields.html.twig #}
+<div class="card mb-3">
+    <div class="card-header">{{ 'Audience'|trans({}, 'mymodule') }}</div>
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label" for="my-field">{{ 'Audience'|trans({}, 'mymodule') }}</label>
+            <select id="my-field" name="image_gallery_slide[my_field]" class="form-select">
+                <option value="all"{{ my_field == 'all' ? ' selected' }}>{{ 'All customers'|trans({}, 'mymodule') }}</option>
+                <option value="members"{{ my_field == 'members' ? ' selected' }}>{{ 'Members only'|trans({}, 'mymodule') }}</option>
+            </select>
+        </div>
+    </div>
+</div>
+```
+
+**The key constraint is the input name**: `image_gallery_slide[<field>]` — and
+`image_gallery_slide[<field>][]` for a `multiple` field. It must match the form name of step 1, otherwise
+the value never reaches the validated data. The hook renders inside the module's `<form>`, so no extra
+`<form>` tag is needed.
+
+Two points about hook wiring:
+
+- The four hook **codes** are inserted in the `hook` table by ImageGallery itself, through
+  `ImageGallery::getHooks()` — the Thelia 3 mechanism for this (idempotent create-or-update, replayed on
+  activation and on every module install/update pass). They are declared with `module => false`
+  (`by_module = 0`), which is exactly what makes them attachable by *your* module: a `by_module` hook is
+  dispatched under a module-scoped event name a plain `safe_hook()` call never reaches.
+- The `module_hook` row binding **your** module to that hook is created automatically by Thelia's
+  `RegisterHookListenersPass` on the next `cache:clear`. You never insert it by hand. If ImageGallery has
+  not been (re)activated since these hooks were added, the code is missing from the `hook` table, the pass
+  logs `Hook … is unknown` and silently skips your hook — check that first when nothing renders.
+
+#### 3. Persist the value
+
+`ImageGallerySlideEvent::getData()` returns a `ParameterBag` holding the **complete validated form data**,
+including the fields added in step 1. Persist on the *post-save* events (`SLIDE_CREATED` / `SLIDE_UPDATED`),
+dispatched once the module transaction is committed:
+
+```php
+<?php
+// local/modules/MyModule/EventListener/ImageGalleryMyModuleListener.php
+
+declare(strict_types=1);
+
+namespace MyModule\EventListener;
+
+use ImageGallery\Event\ImageGalleryEvents;
+use ImageGallery\Event\ImageGallerySlideEvent;
+use MyModule\Model\MySlideData;
+use MyModule\Model\MySlideDataQuery;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+
+class ImageGalleryMyModuleListener implements EventSubscriberInterface
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [
+            ImageGalleryEvents::SLIDE_CREATED => ['persistMyFields', 64],
+            ImageGalleryEvents::SLIDE_UPDATED => ['persistMyFields', 64],
+            ImageGalleryEvents::SLIDE_DELETED => ['cleanupMyData', 64],
+        ];
+    }
+
+    public function persistMyFields(ImageGallerySlideEvent $event): void
+    {
+        $data = $event->getData();
+
+        // Field absent from the submitted data (creation dialog, seed command,
+        // programmatic save): leave the existing value untouched.
+        if (!$data->has('my_field')) {
+            return;
+        }
+
+        $slideId = (int) $event->getSlide()->getId();
+
+        $myData = MySlideDataQuery::create()->findPk($slideId)
+            ?? (new MySlideData())->setImageGalleryId($slideId);
+
+        $myData
+            ->setMyField((string) $data->get('my_field'))
+            ->save();
+    }
+
+    public function cleanupMyData(ImageGallerySlideEvent $event): void
+    {
+        MySlideDataQuery::create()
+            ->filterByImageGalleryId((int) $event->getSlide()->getId())
+            ->delete();
+    }
+}
+```
+
+Notes:
+
+- **Never add columns to the `image_gallery` / `image_gallery_i18n` tables.** Store your data in your own
+  module's tables, keyed by the slide id — that is what keeps the module updatable without a fork.
+- Always guard with `$data->has(...)`: the creation form does not carry the edition fields, and other code
+  paths dispatch the events with a partial (or empty) bag.
+- For an array value (a `multiple` choice), read it through `$data->all()['my_field'] ?? []` — a
+  `ParameterBag` is meant for scalars.
+- `SLIDE_DELETE` / `SLIDE_DELETED` are dispatched with an **empty** data bag: only `getSlide()` is
+  meaningful there. `SLIDE_DELETED` fires after the commit *and* after the image files are removed.
+- `$event->getLocale()` gives the back-office edition locale, when your data is localized.
+- The pre-save events (`SLIDE_CREATE` / `SLIDE_UPDATE`) run **inside** the module transaction, right before
+  the model is written: use them only to alter the slide model itself, never to write your own tables (a
+  rollback would keep them).
+
+#### 4. (Optional) Filter or enrich the lists
+
+`image_gallery.query.extend` hands you the `ImageGalleryQuery` before it runs — the place for front filters.
+Skip it when `isBackendContext()` is true, or the back-office tables would be filtered too and
+administrators would stop seeing their own slides:
+
+```php
+use ImageGallery\Event\ImageGalleryQueryEvent;
+use ImageGallery\Event\ImageGalleryRowEvent;
+
+// …add to getSubscribedEvents():
+//   ImageGalleryEvents::QUERY_EXTEND => ['applyFrontFilters', 64],
+//   ImageGalleryEvents::ROW_ENRICH   => ['enrichRow', 64],
+
+public function applyFrontFilters(ImageGalleryQueryEvent $event): void
+{
+    if ($event->isBackendContext()) {
+        return;
+    }
+
+    $event->getQuery()
+        ->useMySlideDataQuery(null, Criteria::LEFT_JOIN)
+            ->filterByMyField(['all', $this->currentAudience()], Criteria::IN)
+        ->endUse();
+}
+
+public function enrichRow(ImageGalleryRowEvent $event): void
+{
+    $event->set(
+        'myModuleAudience',
+        MySlideDataQuery::create()->findPk((int) $event->getSlide()->getId())?->getMyField() ?? 'all',
+    );
+}
+```
+
+`ImageGalleryRowEvent::set()` adds a key to the flat read-model returned by
+`ImageGalleryPresenter::present()` — visible in the back-office rows, the `ImageGallery` Twig component and
+the theme hook. Namespace your keys; the native ones are reserved.
 
 ## Developer notes — Twig back-office workarounds
 
