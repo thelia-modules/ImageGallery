@@ -19,6 +19,7 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\Finder\SplFileInfo;
 use Thelia\Core\Install\Database;
+use Thelia\Core\Template\TemplateDefinition;
 use Thelia\Model\ConfigQuery;
 use Thelia\Module\BaseModule;
 
@@ -74,6 +75,62 @@ class ImageGallery extends BaseModule
 
     /** Locale used when the session carries none, shared by every presenter consumer. */
     public const DEFAULT_LOCALE = 'en_US';
+
+    /**
+     * Back-office extension slots rendered by the module templates through
+     * `safe_hook()`. They exist so ANOTHER module can attach a listener to them —
+     * `RegisterHookListenersPass` refuses to wire a listener whose hook code is
+     * missing from the `hook` table (« Hook … is unknown »), so the codes have to be
+     * declared somewhere.
+     *
+     * `getHooks()` is the mechanism the Thelia 3 core provides for that: the core
+     * calls it on module activation (BaseModule::activate) and on every module
+     * install/update pass (ModuleManagement), and `createOrUpdateHook()` looks the
+     * code up before writing — it is idempotent by construction, carries the i18n
+     * titles, and needs no hand-written SQL in Config/TheliaMain.sql (which only runs
+     * once, guarded by the `is_initialized` config value).
+     *
+     * `module => false` (`by_module = 0`) is what makes these slots OPEN: a hook
+     * flagged by_module is dispatched under a module-scoped event name
+     * (`hook.2.<code>.<module_id>`), which a plain `safe_hook()` call never reaches.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getHooks(): array
+    {
+        $slots = [
+            'imagegallery.configuration.top' => [
+                'en_US' => 'Image gallery configuration - top',
+                'fr_FR' => 'Configuration de la galerie d\'images - haut',
+            ],
+            'imagegallery.configuration.bottom' => [
+                'en_US' => 'Image gallery configuration - bottom',
+                'fr_FR' => 'Configuration de la galerie d\'images - bas',
+            ],
+            'imagegallery.slide-edit.extra-fields' => [
+                'en_US' => 'Image gallery slide edition - additional fields',
+                'fr_FR' => 'Édition d\'une diapositive - champs additionnels',
+            ],
+            'imagegallery.slide-edit.js' => [
+                'en_US' => 'Image gallery slide edition - JavaScript',
+                'fr_FR' => 'Édition d\'une diapositive - JavaScript',
+            ],
+        ];
+
+        $hooks = [];
+
+        foreach ($slots as $code => $titles) {
+            $hooks[] = [
+                'type' => TemplateDefinition::BACK_OFFICE,
+                'code' => $code,
+                'title' => $titles,
+                'active' => true,
+                'module' => false,
+            ];
+        }
+
+        return $hooks;
+    }
 
     /**
      * @return bool true to continue module activation, false to prevent it

@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 namespace ImageGallery\Service;
 
+use ImageGallery\Event\ImageGalleryEvents;
+use ImageGallery\Event\ImageGallerySlideEvent;
 use ImageGallery\Exception\MissingMobileImageException;
 use ImageGallery\Model\ImageGallery as ImageGalleryModel;
 use ImageGallery\Model\ImageGalleryQuery;
@@ -21,19 +23,27 @@ use ImageGallery\Model\Map\ImageGalleryTableMap;
 use Propel\Runtime\ActiveQuery\Criteria;
 use Propel\Runtime\Connection\ConnectionInterface;
 use Propel\Runtime\Propel;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\ParameterBag;
 
 final readonly class ImageGallerySlideService
 {
     public function __construct(
         private SlideImageStorage $imageStorage,
         private ImageGalleryHtmlSanitizer $htmlSanitizer,
+        private EventDispatcherInterface $eventDispatcher,
     ) {
     }
 
-    public function create(UploadedFile $file, UploadedFile $mobileFile, string $group, string $title, string $locale): ImageGalleryModel
+    /**
+     * @param array<string, mixed> $data full validated creation form data, carried
+     *                                   as-is to the business events so an extender
+     *                                   module receives the fields it added to the form
+     */
+    public function create(UploadedFile $file, UploadedFile $mobileFile, string $group, string $title, string $locale, array $data = []): ImageGalleryModel
     {
-        return $this->inTransaction(function (ConnectionInterface $con) use ($file, $mobileFile, $group, $title, $locale): ImageGalleryModel {
+        $slide = $this->inTransaction(function (ConnectionInterface $con) use ($file, $mobileFile, $group, $title, $locale, $data): ImageGalleryModel {
             $slide = (new ImageGalleryModel())
                 ->setGroup($group)
                 ->setPosition($this->nextPositionInGroup($group))
@@ -42,14 +52,23 @@ final readonly class ImageGallerySlideService
 
             $slide
                 ->setLocale($locale)
-                ->setTitle($title)
-                ->save($con);
+                ->setTitle($title);
+
+            $this->dispatchSlideEvent(ImageGalleryEvents::SLIDE_CREATE, $slide, $data, $locale);
+
+            $slide->save($con);
 
             $this->attachImage($slide, $file, ImageVariant::Desktop);
             $this->attachImage($slide, $mobileFile, ImageVariant::Mobile);
 
             return $slide;
         });
+
+        // Post-save: the slide has an id and its native fields are committed, so an
+        // extender module can safely key its own tables on it.
+        $this->dispatchSlideEvent(ImageGalleryEvents::SLIDE_CREATED, $slide, $data, $locale);
+
+        return $slide;
     }
 
     /**
@@ -90,12 +109,18 @@ final readonly class ImageGallerySlideService
                 $slide->setPosition($this->nextPositionInGroup($newGroup));
             }
 
+            // Dispatched once the native fields are applied but before the write, so a
+            // listener may still alter the model within the same transaction.
+            $this->dispatchSlideEvent(ImageGalleryEvents::SLIDE_UPDATE, $slide, $data, $locale);
+
             $slide->save($con);
 
             if ($previousGroup !== $newGroup) {
                 $this->renumberGroup($previousGroup, $con);
             }
         });
+
+        $this->dispatchSlideEvent(ImageGalleryEvents::SLIDE_UPDATED, $slide, $data, $locale);
     }
 
     public function delete(int $slideId): void
@@ -110,6 +135,8 @@ final readonly class ImageGallerySlideService
         $imagePaths = $this->imagePaths($slide);
 
         $this->inTransaction(function (ConnectionInterface $con) use ($slide, $group): void {
+            $this->dispatchSlideEvent(ImageGalleryEvents::SLIDE_DELETE, $slide);
+
             $slide->delete($con);
             $this->renumberGroup($group, $con);
         });
@@ -117,6 +144,10 @@ final readonly class ImageGallerySlideService
         // Images are removed only once the deletion is committed: a rolled back
         // transaction would otherwise leave a slide pointing at deleted files.
         $this->imageStorage->removeFiles($imagePaths);
+
+        // Same rule for the extenders' own data: cleaning up before the commit would
+        // lose it on a rollback.
+        $this->dispatchSlideEvent(ImageGalleryEvents::SLIDE_DELETED, $slide);
     }
 
     public function updatePosition(int $slideId, int $position): void
@@ -158,6 +189,20 @@ final readonly class ImageGallerySlideService
     public function attachImage(ImageGalleryModel $slide, UploadedFile $uploadedFile, ImageVariant $variant): void
     {
         $this->imageStorage->store($slide, $uploadedFile, $variant);
+    }
+
+    /**
+     * Single dispatch point of the slide business events, so every one of them
+     * carries the same payload shape (model + full form data + locale).
+     *
+     * @param array<string, mixed> $data
+     */
+    private function dispatchSlideEvent(string $eventName, ImageGalleryModel $slide, array $data = [], ?string $locale = null): void
+    {
+        $this->eventDispatcher->dispatch(
+            new ImageGallerySlideEvent($slide, new ParameterBag($data), $locale),
+            $eventName,
+        );
     }
 
     /**

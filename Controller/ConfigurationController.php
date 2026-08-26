@@ -64,6 +64,9 @@ class ConfigurationController extends BaseAdminController
                 $data['group'],
                 $data['title'],
                 $this->getCurrentEditionLocale(),
+                // Full validated data, so the fields another module added to the
+                // creation form through FORM_AFTER_BUILD reach the business events.
+                $data,
             );
 
             return new RedirectResponse($this->editUrl($slide->getId()));

@@ -14,19 +14,28 @@ declare(strict_types=1);
 
 namespace ImageGallery\Service;
 
+use ImageGallery\Event\ImageGalleryEvents;
+use ImageGallery\Event\ImageGalleryQueryEvent;
+use ImageGallery\Event\ImageGalleryRowEvent;
 use ImageGallery\Model\ImageGallery as ImageGalleryModel;
 use ImageGallery\Model\ImageGalleryQuery;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
 /**
  * Builds the flat read-model of a slide consumed by the back-office, the theme
  * hook and the Twig component. Image processing itself belongs to
  * ImageGalleryImageProcessor.
+ *
+ * Every list it builds goes through the `image_gallery.query.extend` event, and
+ * every presented row through `image_gallery.row.enrich`, so another module can
+ * filter and enrich both the back-office and the front rendering without forking.
  */
 final readonly class ImageGalleryPresenter
 {
     public function __construct(
         private ImageGalleryImageProcessor $imageProcessor,
         private ImageGalleryHtmlSanitizer $htmlSanitizer,
+        private EventDispatcherInterface $eventDispatcher,
     ) {
     }
 
@@ -37,13 +46,15 @@ final readonly class ImageGalleryPresenter
     {
         $groups = [];
 
-        $slides = ImageGalleryQuery::create()
+        $query = ImageGalleryQuery::create()
             ->joinWithI18n($locale)
             ->orderByGroup()
-            ->orderByPosition()
-            ->find();
+            ->orderByPosition();
 
-        foreach ($slides as $slide) {
+        // Back-office context: extenders must not apply their front filters here.
+        $this->extendQuery($query, backendContext: true, group: null, locale: $locale);
+
+        foreach ($query->find() as $slide) {
             $groups[$slide->getGroup() ?? ''][] = $this->present($slide, $locale, $thumbnailWidth, $thumbnailHeight);
         }
 
@@ -63,6 +74,8 @@ final readonly class ImageGalleryPresenter
             ->filterByPublished()
             ->orderByPosition();
 
+        $this->extendQuery($query, backendContext: false, group: $group, locale: $locale);
+
         foreach ($query->find() as $slide) {
             $slides[] = $this->present($slide, $locale, $width, $height);
         }
@@ -77,7 +90,7 @@ final readonly class ImageGalleryPresenter
     {
         $slide->setLocale($locale);
 
-        return [
+        $row = [
             'id' => $slide->getId(),
             'group' => $slide->getGroup(),
             'position' => $slide->getPosition(),
@@ -102,6 +115,24 @@ final readonly class ImageGalleryPresenter
             'mobileFile' => $slide->getMobileFile(),
             ...$this->imageProcessor->imageFields($slide->getFile(), $slide->getMobileFile(), $width, $height),
         ];
+
+        $event = new ImageGalleryRowEvent($slide, $row, $locale);
+
+        $this->eventDispatcher->dispatch($event, ImageGalleryEvents::ROW_ENRICH);
+
+        return $event->getRow();
+    }
+
+    /**
+     * Hands the query to the extender modules before it runs. Kept private and
+     * called from every list builder, so a new list can never forget it.
+     */
+    private function extendQuery(ImageGalleryQuery $query, bool $backendContext, ?string $group, string $locale): void
+    {
+        $this->eventDispatcher->dispatch(
+            new ImageGalleryQueryEvent($query, $backendContext, $group, $locale),
+            ImageGalleryEvents::QUERY_EXTEND,
+        );
     }
 
     /**

@@ -91,6 +91,13 @@
                         </div>
                     </div>
 
+                    {# Extension slot, INSIDE the module <form>: another module renders its
+                       own inputs here, named `image_gallery_slide[<field>]` — the form name
+                       is ImageGallerySlideForm::getName(). The matching field must be added
+                       to the builder through FORM_AFTER_BUILD, otherwise validation rejects
+                       it as an extra field. See ImageGallery::getHooks() and the Readme. #}
+                    {{ safe_hook('imagegallery.slide-edit.extra-fields', { slide_id: slide.id, group: slide.group }) }}
+
                     <div class="d-grid mb-3">
                         <button type="submit" class="btn btn-primary" data-testid="image-gallery-slide-save">
                             <i class="bi bi-check2" aria-hidden="true"></i> {{ 'Save'|trans }}
@@ -140,5 +147,7 @@
 
 {% block scripts_extra %}
     {{ safe_hook('wysiwyg.js', { location: 'wysiwyg-image-gallery-slide-edit' }) }}
+    {# Extension slot — see ImageGallery::getHooks() and the Readme. #}
+    {{ safe_hook('imagegallery.slide-edit.js', { slide_id: slide.id, group: slide.group }) }}
     {% include '@ImageGalleryModule/backOffice/default-twig/imagegallery/hook/_side-nav-active.html.twig' %}
 {% endblock %}
